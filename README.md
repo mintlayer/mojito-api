@@ -1,5 +1,7 @@
 # mojito-api
 
+[![CI](https://github.com/mintlayer/mojito-api/actions/workflows/ci.yml/badge.svg)](https://github.com/mintlayer/mojito-api/actions/workflows/ci.yml)
+
 Mojito API gateway: the Mintlayer **batch/aggregation service** behind
 `mojito-api.mintlayer.org` and `api.mintini.app`, plus a hardened
 **IPFS content cache**.
