@@ -1,0 +1,49 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Lint
+        run: npm run lint:check
+
+      - name: Format check
+        run: npm run format:check
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Build
+        run: npm run build
+
+      # Defense in depth: the repo is PUBLIC — fail the build if a known
+      # burned secret ever re-enters the tree. Only key PREFIXES are listed
+      # (full values would trip GitHub push protection and re-publish the
+      # retired secrets; the prefixes uniquely identify them anyway).
+      - name: Secret scan
+        run: |
+          ! grep -rEi "1f793ee8|118f6af2" --include="*.ts" --include="*.js" --include="*.json" --include="*.env*" -l src test .env.example
+          ! grep -rEn "X-CMC_PRO_API_KEY['\"]?\s*[:=]\s*['\"]?[0-9a-f]{8}-" src/ test/ 2>/dev/null
