@@ -37,6 +37,10 @@ export const configValidationSchema = Joi.object({
     .default(5 * 1024 * 1024),
   IPFS_MEMORY_CACHE_MAX_ENTRIES: Joi.number().min(0).default(5000),
   IPFS_NEGATIVE_TTL_MS: Joi.number().min(0).default(60000),
+
+  // Optional CoinGecko demo/pro key (x-cg-demo-api-key header)
+  CG_API_KEY: Joi.string().allow('').default(''),
+  PRICES_TTL_MS: Joi.number().min(60_000).default(600_000),
 });
 
 export default () => ({
@@ -50,6 +54,12 @@ export default () => ({
   },
   upstreamTtlMs: parseInt(process.env.UPSTREAM_TTL_MS ?? '30000', 10),
   chainTipPollMs: parseInt(process.env.CHAIN_TIP_POLL_MS ?? '10000', 10),
+  cg: {
+    apiKey: process.env.CG_API_KEY ?? '',
+  },
+  prices: {
+    ttlMs: parseInt(process.env.PRICES_TTL_MS ?? '600000', 10),
+  },
   ipfs: {
     gateways: (process.env.IPFS_GATEWAYS ?? '').split(',').filter(Boolean),
     timeoutMs: parseInt(process.env.IPFS_TIMEOUT_MS ?? '12000', 10),
