@@ -8,6 +8,7 @@ import { PriceService } from './batch/price.service';
 import { UpstreamModule } from './batch/upstream.module';
 import { ChainModule } from './chain/chain.module';
 import { IpfsModule } from './ipfs/ipfs.module';
+import { PricesModule } from './prices/prices.module';
 import configuration, { configValidationSchema } from './config/configuration';
 
 @Module({
@@ -24,6 +25,7 @@ import configuration, { configValidationSchema } from './config/configuration';
     UpstreamModule,
     ChainModule,
     IpfsModule,
+    PricesModule,
   ],
   controllers: [BatchController, MintiniController],
   providers: [PriceService, { provide: APP_GUARD, useClass: ThrottlerGuard }],
