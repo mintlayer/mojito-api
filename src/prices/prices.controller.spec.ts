@@ -3,7 +3,7 @@ import { Test } from '@nestjs/testing';
 import request from 'supertest';
 import { PricesController } from './prices.controller';
 import { PricesService } from './prices.service';
-import { PRICE_ID_BY_TICKER } from './ticker-map';
+import { BRIDGE_TICKERS, PRICE_ID_BY_TICKER } from './ticker-map';
 
 describe('PricesController', () => {
   let app: INestApplication;
@@ -77,6 +77,23 @@ describe('PricesController', () => {
       expect(getPricesMock).toHaveBeenCalledWith([]);
     });
 
+    it('caps the ?tickers filter at the covered ticker count', async () => {
+      getPricesMock.mockResolvedValue({ ml: 0.05 });
+
+      const query = Array.from({ length: 50 }, (_, i) => ` ticker${i} `).join(
+        ',',
+      );
+      await request(app.getHttpServer())
+        .get(`/prices?tickers=${encodeURIComponent(query)}`)
+        .expect(200);
+
+      // Query noise beyond the covered set is dropped before the service sees it.
+      expect(getPricesMock).toHaveBeenCalledTimes(1);
+      expect(getPricesMock).toHaveBeenCalledWith(
+        Array.from({ length: BRIDGE_TICKERS.length }, (_, i) => `ticker${i}`),
+      );
+    });
+
     it('is CORS-open for the browser bridge', async () => {
       getPricesMock.mockResolvedValue({ ml: 0.05 });
 
@@ -99,7 +116,7 @@ describe('PricesController', () => {
 
       expect(response.body).toEqual({
         covered: 36,
-        prices_stale: false,
+        pricesStale: false,
         map: PRICE_ID_BY_TICKER,
       });
       expect(coveredTickerCountMock).toHaveBeenCalledTimes(1);
@@ -115,7 +132,7 @@ describe('PricesController', () => {
         .expect(200);
 
       expect(response.headers['access-control-allow-origin']).toBe('*');
-      expect(response.body.prices_stale).toBe(true);
+      expect(response.body.pricesStale).toBe(true);
     });
   });
 });

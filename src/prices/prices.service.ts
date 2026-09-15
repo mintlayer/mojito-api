@@ -1,13 +1,19 @@
-import { Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import {
-  BRIDGE_TICKERS,
-  PRICE_ID_BY_TICKER,
-  tickerToPriceId,
-} from './ticker-map';
+  Injectable,
+  Logger,
+  OnModuleDestroy,
+  OnModuleInit,
+} from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { BRIDGE_TICKERS, PRICE_ID_BY_TICKER } from './ticker-map';
 
 const CG_SIMPLE_PRICE_URL = 'https://api.coingecko.com/api/v3/simple/price';
 const DEFAULT_TTL_MS = 10 * 60_000; // one batched CG call per TTL, max
+// Backoff for FAILED refreshes: fetchedAt only moves on success, so without
+// this floor an upstream outage would turn every request into a new CG call
+// (each awaiting up to the 15s timeout). With it, request-path retries are
+// capped at one per MIN_RETRY_MS; the map keeps being served stale.
+export const MIN_RETRY_MS = 30_000;
 
 /**
  * Server-side USD prices for the full bridge asset set.
@@ -21,11 +27,12 @@ const DEFAULT_TTL_MS = 10 * 60_000; // one batched CG call per TTL, max
  * `stale`, not blank every ticker.
  */
 @Injectable()
-export class PricesService implements OnModuleDestroy {
+export class PricesService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(PricesService.name);
   private readonly ttlMs: number;
   private prices: Record<string, number> = {};
   private fetchedAt = 0;
+  private lastAttemptAt = 0;
   private inFlight?: Promise<void>;
   private timer?: NodeJS.Timeout;
 
@@ -53,9 +60,10 @@ export class PricesService implements OnModuleDestroy {
    * before the first successful fetch.
    */
   async getPrices(tickers?: string[]): Promise<Record<string, number>> {
-    // refresh() dedupes concurrent callers; only staleness triggers a new
-    // fetch so sequential traffic stays at one CG call per TTL.
-    if (this.isStale()) {
+    // refresh() dedupes concurrent callers; staleness + the failed-refresh
+    // backoff gate a new fetch, so sequential traffic stays at one CG call
+    // per TTL when healthy and one per MIN_RETRY_MS during an outage.
+    if (this.isStale() && Date.now() - this.lastAttemptAt > MIN_RETRY_MS) {
       void this.refresh();
     }
     if (this.inFlight) await this.inFlight.catch(() => {});
@@ -80,6 +88,10 @@ export class PricesService implements OnModuleDestroy {
 
   private async refresh(): Promise<void> {
     if (this.inFlight) return this.inFlight;
+    // Record the attempt up front: also covers the interval-triggered and
+    // boot refreshes, so the request path can never hot-loop a failing
+    // upstream right after one of those failed.
+    this.lastAttemptAt = Date.now();
     this.inFlight = this.doRefresh().finally(() => {
       this.inFlight = undefined;
     });
@@ -87,7 +99,7 @@ export class PricesService implements OnModuleDestroy {
   }
 
   private async doRefresh(): Promise<void> {
-    const ids = BRIDGE_TICKERS.map((t) => PRICE_ID_BY_TICKER[t]);
+    const ids = Object.values(PRICE_ID_BY_TICKER);
     const apiKey = this.config.get<string>('cg.apiKey', '');
     const headers: Record<string, string> = { accept: 'application/json' };
     if (apiKey) headers['x-cg-demo-api-key'] = String(apiKey);
@@ -102,8 +114,9 @@ export class PricesService implements OnModuleDestroy {
       }
       const byId: Record<string, { usd?: number }> = await response.json();
       const next: Record<string, number> = {};
-      for (const ticker of BRIDGE_TICKERS) {
-        const id = tickerToPriceId(ticker)!;
+      // Iterating the map's own entries keeps ticker/id pairing structural —
+      // no per-ticker lookup that could assert or silently diverge.
+      for (const [ticker, id] of Object.entries(PRICE_ID_BY_TICKER)) {
         const usd = byId[id]?.usd;
         if (typeof usd === 'number' && Number.isFinite(usd) && usd > 0) {
           next[ticker] = usd;

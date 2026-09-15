@@ -1,6 +1,6 @@
 import { Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { PricesService } from './prices.service';
+import { MIN_RETRY_MS, PricesService } from './prices.service';
 import { BRIDGE_TICKERS, PRICE_ID_BY_TICKER } from './ticker-map';
 
 const TTL_MS = 600_000;
@@ -248,6 +248,7 @@ describe('PricesService', () => {
         ...allPricesPayload(),
         mintlayer: { usd: 0.123 },
       };
+      jest.advanceTimersByTime(MIN_RETRY_MS + 1); // out of the failed-refresh backoff window
       fetchMock.mockResolvedValueOnce(cgOk(recovered));
       const afterRecovery = await service.getPrices();
 
@@ -296,6 +297,33 @@ describe('PricesService', () => {
       const service = makeService();
 
       await expect(service.getPrices()).resolves.toEqual({});
+    });
+  });
+
+  describe('failed-refresh backoff', () => {
+    it('throttles request-path retries during an upstream outage', async () => {
+      fetchMock.mockResolvedValueOnce(cgOk(allPricesPayload()));
+      const service = makeService();
+      const initial = await service.getPrices();
+      expect(fetchMock).toHaveBeenCalledTimes(1);
+
+      jest.advanceTimersByTime(TTL_MS + 1); // cache goes stale
+      fetchMock.mockRejectedValueOnce(new Error('network down'));
+      const afterFailure = await service.getPrices(); // attempt #2 fails, backoff starts
+
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(afterFailure).toEqual(initial); // stale map still served
+
+      const insideWindow = await service.getPrices(); // inside the retry window
+      expect(fetchMock).toHaveBeenCalledTimes(2); // throttled: no new CG call
+      expect(insideWindow).toEqual(initial); // previous map, no in-flight wait
+
+      jest.advanceTimersByTime(MIN_RETRY_MS + 1);
+      fetchMock.mockRejectedValueOnce(new Error('still down'));
+      const afterBackoff = await service.getPrices(); // attempt #3 allowed
+
+      expect(fetchMock).toHaveBeenCalledTimes(3); // one CG call per retry window
+      expect(afterBackoff).toEqual(initial);
     });
   });
 

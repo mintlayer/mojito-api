@@ -1,7 +1,7 @@
 import { Controller, Get, Header, Query } from '@nestjs/common';
 import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { PricesService } from './prices.service';
-import { PRICE_ID_BY_TICKER } from './ticker-map';
+import { BRIDGE_TICKERS, PRICE_ID_BY_TICKER } from './ticker-map';
 
 /**
  * USD prices for the full bridge asset set (crypto + 20 xStocks).
@@ -25,11 +25,14 @@ export class PricesController {
   })
   @Header('Access-Control-Allow-Origin', '*')
   async getPrices(@Query('tickers') tickersStr?: string) {
+    // The filter can only ever select from the fixed covered set — anything
+    // beyond BRIDGE_TICKERS.length entries is query noise, so it is capped.
     const tickers = tickersStr
       ? tickersStr
           .split(',')
           .map((t) => t.trim())
           .filter(Boolean)
+          .slice(0, BRIDGE_TICKERS.length)
       : undefined;
     return this.prices.getPrices(tickers);
   }
@@ -42,7 +45,7 @@ export class PricesController {
   coverage() {
     return {
       covered: this.prices.coveredTickerCount(),
-      prices_stale: this.prices.isStale(),
+      pricesStale: this.prices.isStale(),
       map: PRICE_ID_BY_TICKER,
     };
   }
