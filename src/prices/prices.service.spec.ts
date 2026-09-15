@@ -198,24 +198,20 @@ describe('PricesService', () => {
       expect(service.isStale()).toBe(false);
     });
 
-    it('does not stack refreshes while a fresh in-flight refresh is already running', async () => {
+    it('does not refresh at all while the cache is fresh (TTL honored on the request path)', async () => {
       fetchMock.mockResolvedValue(cgOk(allPricesPayload()));
       const service = makeService();
       await service.getPrices(); // refresh #1 → cache fresh
 
-      const gate = deferred<CgResponse>();
-      fetchMock.mockImplementationOnce(() => gate.promise);
-
       jest.advanceTimersByTime(TTL_MS / 2); // still well within the TTL
       expect(service.isStale()).toBe(false);
 
-      const first = service.getPrices(); // no in-flight → starts the shared refresh
-      const second = service.getPrices(); // rides the in-flight refresh
+      const first = service.getPrices(); // fresh → served from the cached map
+      const second = service.getPrices(); // no refresh, same cached map
       const third = service.getPrices(['wbtc']);
-      gate.resolve(cgOk(allPricesPayload()));
       const [r1, r2, r3] = await Promise.all([first, second, third]);
 
-      expect(fetchMock).toHaveBeenCalledTimes(2); // one shared refresh, not four
+      expect(fetchMock).toHaveBeenCalledTimes(1); // TTL honored: zero CG fetches while fresh
       expect(Object.keys(r1)).toHaveLength(36);
       expect(Object.keys(r2)).toHaveLength(36);
       expect(r3).toEqual({ wbtc: 6 });
